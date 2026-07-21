@@ -1,0 +1,12 @@
+{
+  "name": "Home Library",
+  "short_name": "Library",
+  "description": "Your private home book catalog",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f3efe5",
+  "theme_color": "#16352d",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

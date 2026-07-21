@@ -1,0 +1,9 @@
+# The maintained Docker application lives in /library-v1.
+# Keep the earlier root-level prototype and package cache out of releases.
+/.pnpm-store/
+/README.md
+/app.js
+/index.html
+/manifest.webmanifest
+/service-worker.js
+/styles.css

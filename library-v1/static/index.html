@@ -1,0 +1,378 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#16352d">
+    <meta name="description" content="A private, cozy catalog for your home library.">
+    <title>Home Library</title>
+    <link rel="icon" href="/icon.svg" type="image/svg+xml">
+    <link rel="manifest" href="/manifest.webmanifest">
+    <link rel="stylesheet" href="/styles.css?v=1.4.1">
+    <script src="/vendor/html5-qrcode.min.js?v=2.3.8" defer></script>
+    <script src="/app.js?v=1.4.1" defer></script>
+  </head>
+  <body>
+    <div class="ambient ambient-one"></div>
+    <div class="ambient ambient-two"></div>
+
+    <header class="site-header">
+      <a class="brand" href="/" aria-label="Home Library home">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 48 48" role="img"><path d="M9 9.5c5.8-.6 10.8.8 15 4.3v25.7c-4.2-3.5-9.2-5-15-4.3V9.5Zm30 0c-5.8-.6-10.8.8-15 4.3v25.7c4.2-3.5 9.2-5 15-4.3V9.5Z"/><path d="M24 14v25.5"/></svg>
+        </span>
+        <span>
+          <strong>Home Library</strong>
+          <small id="brand-count">A place for every story</small>
+        </span>
+      </a>
+      <div class="header-actions">
+        <button class="icon-button" id="restore-backup" type="button" title="Restore a library backup" aria-label="Restore library backup">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0L8 8m4-4 4 4M5 20h14"/></svg>
+        </button>
+        <input id="restore-file" type="file" accept="application/json,.json" hidden>
+        <a class="icon-button" href="/api/export" title="Download a library backup" aria-label="Download library backup">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 19h14"/></svg>
+        </a>
+        <button class="primary-button compact" id="header-add" type="button" aria-label="Add book">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+          <span>Add book</span>
+        </button>
+      </div>
+    </header>
+
+    <main>
+      <section class="hero" aria-labelledby="page-title">
+        <div class="hero-copy">
+          <p class="eyebrow">Your personal collection</p>
+          <h1 id="page-title">Every book has<br>a place here.</h1>
+          <p>Keep track of what’s waiting on the shelf, what you’re reading now, and the stories you’ve finished.</p>
+          <button class="primary-button hero-add" id="hero-add" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+            Add your first book
+          </button>
+        </div>
+
+        <div class="stats-panel" aria-label="Library overview">
+          <button class="stat-card total" data-stat-filter="all" type="button">
+            <span class="stat-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v16H6.5A2.5 2.5 0 0 0 4 21.5v-16Z"/><path d="M4 18.5A2.5 2.5 0 0 1 6.5 16H20"/></svg></span>
+            <span class="stat-number" id="stat-total">0</span>
+            <span class="stat-label">Total books</span>
+          </button>
+          <button class="stat-card reading" data-stat-filter="in_progress" type="button">
+            <span class="stat-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 3v18M18 3v18M6 5h12v14H6"/><path d="M9 8h6M9 12h6"/></svg></span>
+            <span class="stat-number" id="stat-reading">0</span>
+            <span class="stat-label">Reading now</span>
+          </button>
+          <button class="stat-card tbr" data-stat-filter="tbr" type="button">
+            <span class="stat-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m7 3 10 2v16L7 19V3Z"/><path d="M7 3h10v18"/></svg></span>
+            <span class="stat-number" id="stat-tbr">0</span>
+            <span class="stat-label">To be read</span>
+          </button>
+          <button class="stat-card finished" data-stat-filter="finished" type="button">
+            <span class="stat-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m8 12 2.5 2.5L16 9"/></svg></span>
+            <span class="stat-number" id="stat-finished">0</span>
+            <span class="stat-label">Finished</span>
+          </button>
+        </div>
+      </section>
+
+      <section class="collection" aria-labelledby="collection-title">
+        <div class="collection-heading">
+          <div>
+            <p class="eyebrow">Browse the shelves</p>
+            <h2 id="collection-title">My collection</h2>
+          </div>
+          <label class="search-box">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m16 16 4 4"/></svg>
+            <span class="sr-only">Search your library</span>
+            <input id="library-search" type="search" placeholder="Search title, author, series…" autocomplete="off">
+            <kbd>/</kbd>
+          </label>
+        </div>
+
+        <div class="toolbar">
+          <div class="filter-tabs" role="group" aria-label="Filter by reading status">
+            <button class="filter-tab active" data-filter="all" type="button">All</button>
+            <button class="filter-tab" data-filter="in_progress" type="button">In progress</button>
+            <button class="filter-tab" data-filter="tbr" type="button">TBR</button>
+            <button class="filter-tab" data-filter="finished" type="button">Finished</button>
+            <button class="filter-tab" data-filter="dnf" type="button">DNF</button>
+          </div>
+          <div class="toolbar-controls">
+            <label class="sort-control">
+              <span>Ownership</span>
+              <select id="library-ownership">
+                <option value="all">All</option>
+                <option value="owned">Owned</option>
+                <option value="ku">Kindle Unlimited</option>
+                <option value="need_to_purchase">Need to purchase</option>
+              </select>
+            </label>
+          <label class="sort-control">
+            <span>Sort by</span>
+            <select id="library-sort">
+              <option value="updated">Recently updated</option>
+              <option value="title">Title A–Z</option>
+              <option value="author">Author A–Z</option>
+              <option value="oldest">Oldest added</option>
+            </select>
+          </label>
+          </div>
+        </div>
+
+        <div id="book-grid" class="book-grid" aria-live="polite"></div>
+
+        <div class="empty-state" id="empty-state" hidden>
+          <div class="empty-books" aria-hidden="true">
+            <span></span><span></span><span></span><span></span>
+          </div>
+          <h3 id="empty-title">Your shelves are waiting</h3>
+          <p id="empty-copy">Add a book and we’ll fetch its cover for you.</p>
+          <button class="primary-button" id="empty-add" type="button">Add a book</button>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <span>Home Library V1</span>
+      <span aria-hidden="true">•</span>
+      <span>Your collection stays on this server</span>
+    </footer>
+
+    <dialog class="book-dialog" id="book-dialog">
+      <form id="book-form">
+        <div class="dialog-header">
+          <div>
+            <p class="eyebrow" id="dialog-kicker">Add to your shelves</p>
+            <h2 id="dialog-title">Add a book</h2>
+          </div>
+          <button class="close-button" id="close-dialog" type="button" aria-label="Close">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>
+          </button>
+        </div>
+
+        <div class="dialog-scroll">
+          <section class="lookup-panel" id="lookup-panel">
+            <label for="lookup-query">Find book details &amp; cover</label>
+            <p>Search by title, author, or ISBN. No typing everything by hand.</p>
+            <div class="lookup-search">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m16 16 4 4"/></svg>
+              <input id="lookup-query" type="search" placeholder="Try “Fourth Wing” or an ISBN" autocomplete="off">
+              <button id="lookup-button" type="button">Search</button>
+            </div>
+            <button class="scan-isbn-button" id="scan-isbn" type="button">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8V4h4M16 4h4v4M20 16v4h-4M8 20H4v-4M7 9v6M10 8v8M14 8v8M17 9v6"/></svg>
+              Scan a barcode instead
+            </button>
+            <div class="lookup-status" id="lookup-status" aria-live="polite"></div>
+            <div class="lookup-results" id="lookup-results"></div>
+          </section>
+
+          <section class="series-import-panel" id="series-import-panel" hidden>
+            <div class="series-import-heading">
+              <div>
+                <p class="series-import-kicker">Complete the collection</p>
+                <h3 id="series-import-title">Add the rest of this series?</h3>
+              </div>
+              <label class="series-import-toggle" id="series-import-toggle-wrap">
+                <input id="add-full-series" type="checkbox" checked>
+                <span aria-hidden="true"></span>
+                <b class="sr-only">Add missing series books as TBR</b>
+              </label>
+            </div>
+            <p class="series-import-summary" id="series-import-summary"></p>
+            <div class="series-import-books" id="series-import-books"></div>
+          </section>
+
+          <div class="form-divider"><span>Book details</span></div>
+
+          <input id="book-id" name="id" type="hidden">
+          <input id="book-cover-url" name="cover_url" type="hidden">
+          <input id="book-open-library-key" name="open_library_key" type="hidden">
+
+          <div class="book-editor">
+            <div class="cover-editor">
+              <div class="cover-preview" id="cover-preview">
+                <div class="cover-placeholder"><span>Cover</span></div>
+                <img id="cover-preview-image" alt="Selected book cover" hidden>
+              </div>
+              <div class="cover-actions">
+                <button class="cover-upload-button" id="upload-cover" type="button">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0L8 8m4-4 4 4M5 20h14"/></svg>
+                  Upload cover
+                </button>
+                <input id="book-cover-file" type="file" accept="image/jpeg,image/png,image/webp" hidden>
+                <button class="text-button" id="clear-cover" type="button">Remove cover</button>
+              </div>
+            </div>
+
+            <div class="fields">
+              <label class="field full">
+                <span>Title <b>*</b></span>
+                <input id="book-title" name="title" maxlength="300" required placeholder="Book title">
+              </label>
+              <label class="field full">
+                <span>Author</span>
+                <input id="book-authors" name="authors" maxlength="500" placeholder="Author name">
+              </label>
+              <label class="field">
+                <span>Series</span>
+                <input id="book-series" name="series" maxlength="300" placeholder="Optional">
+              </label>
+              <label class="field small-field">
+                <span>Book #</span>
+                <input id="book-volume" name="volume" maxlength="50" placeholder="e.g. 2">
+              </label>
+              <label class="field">
+                <span>ISBN</span>
+                <input id="book-isbn" name="isbn" maxlength="20" inputmode="numeric" placeholder="978…">
+              </label>
+              <label class="field small-field">
+                <span>Pages</span>
+                <input id="book-total-pages" name="total_pages" type="number" min="0" max="100000" inputmode="numeric" placeholder="—">
+              </label>
+            </div>
+          </div>
+
+          <fieldset class="ownership-fieldset">
+            <legend>Ownership</legend>
+            <div class="ownership-options">
+              <label><input type="radio" name="ownership" value="owned" checked><span>Owned</span></label>
+              <label><input type="radio" name="ownership" value="ku"><span>Kindle Unlimited</span></label>
+              <label><input type="radio" name="ownership" value="need_to_purchase"><span>Need to purchase</span></label>
+            </div>
+          </fieldset>
+
+          <fieldset class="format-fieldset">
+            <legend>Book type <small>Select all that apply</small></legend>
+            <div class="format-options">
+              <label><input type="checkbox" name="formats" value="physical" checked><span><i aria-hidden="true">P</i>Physical</span></label>
+              <label><input type="checkbox" name="formats" value="ebook"><span><i aria-hidden="true">E</i>eBook</span></label>
+              <label><input type="checkbox" name="formats" value="audiobook"><span><i aria-hidden="true">A</i>Audiobook</span></label>
+            </div>
+          </fieldset>
+
+          <fieldset class="status-fieldset">
+            <legend>Reading status</legend>
+            <div class="status-options">
+              <label><input type="radio" name="status" value="tbr" checked><span><i class="status-dot tbr-dot"></i>To be read</span></label>
+              <label><input type="radio" name="status" value="in_progress"><span><i class="status-dot reading-dot"></i>In progress</span></label>
+              <label><input type="radio" name="status" value="finished"><span><i class="status-dot finished-dot"></i>Finished</span></label>
+              <label><input type="radio" name="status" value="dnf"><span><i class="status-dot dnf-dot"></i>DNF</span></label>
+            </div>
+          </fieldset>
+
+          <div class="progress-field" id="progress-field" hidden>
+            <div><label for="book-current-page">Current page</label><output id="progress-output">Page 0 of 0</output></div>
+            <input id="book-current-page" name="current_page" type="range" min="0" max="1" value="0" step="1">
+          </div>
+
+          <div class="rating-field">
+            <span>Your rating</span>
+            <div class="star-rating" id="star-rating" role="group" aria-label="Book rating">
+              <button type="button" data-rating="1" aria-label="1 star">★</button>
+              <button type="button" data-rating="2" aria-label="2 stars">★</button>
+              <button type="button" data-rating="3" aria-label="3 stars">★</button>
+              <button type="button" data-rating="4" aria-label="4 stars">★</button>
+              <button type="button" data-rating="5" aria-label="5 stars">★</button>
+              <button class="clear-rating" type="button" data-rating="0">Clear</button>
+            </div>
+            <input id="book-rating" name="rating" type="hidden" value="0">
+          </div>
+
+          <label class="field notes-field">
+            <span>Notes</span>
+            <textarea id="book-notes" name="notes" rows="4" maxlength="5000" placeholder="Favorite quotes, thoughts, who lent it to you…"></textarea>
+          </label>
+        </div>
+
+        <div class="dialog-footer">
+          <div class="dialog-footer-left">
+            <button class="danger-button" id="delete-book" type="button" hidden>Delete</button>
+            <button class="secondary-button" id="refresh-book-metadata" type="button" hidden>Refresh metadata</button>
+          </div>
+          <div class="dialog-footer-right">
+            <button class="secondary-button" id="cancel-dialog" type="button">Cancel</button>
+            <button class="primary-button" id="save-book" type="submit">Save book</button>
+          </div>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog class="series-dialog" id="series-dialog">
+      <div class="series-dialog-shell">
+        <div class="dialog-header">
+          <div>
+            <p class="eyebrow">Series collection</p>
+            <h2 id="series-dialog-title">Series</h2>
+          </div>
+          <div class="series-header-actions">
+            <button class="secondary-button refresh-series-button" id="refresh-series-metadata" type="button">Refresh series</button>
+            <button class="close-button" id="close-series-dialog" type="button" aria-label="Close series">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="series-dialog-scroll">
+          <div class="series-book-list" id="series-book-list"></div>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog class="utility-dialog" id="restore-dialog">
+      <div class="utility-dialog-shell">
+        <div class="dialog-header">
+          <div><p class="eyebrow">Bring your shelves back</p><h2>Restore backup</h2></div>
+          <button class="close-button" id="close-restore-dialog" type="button" aria-label="Close restore"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+        </div>
+        <div class="utility-dialog-body">
+          <p id="restore-summary"></p>
+          <fieldset class="restore-modes">
+            <legend>How should it be restored?</legend>
+            <label><input type="radio" name="restore-mode" value="merge" checked><span><strong>Merge safely</strong><small>Add books that are not already here. Existing books stay unchanged.</small></span></label>
+            <label><input type="radio" name="restore-mode" value="replace"><span><strong>Replace library</strong><small>Remove this library and restore exactly what is in the backup.</small></span></label>
+          </fieldset>
+        </div>
+        <div class="utility-dialog-footer">
+          <button class="secondary-button" id="cancel-restore" type="button">Cancel</button>
+          <button class="primary-button" id="apply-restore" type="button">Restore books</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog class="utility-dialog scanner-dialog" id="scanner-dialog">
+      <div class="utility-dialog-shell">
+        <div class="dialog-header">
+          <div><p class="eyebrow">Phone camera</p><h2>Scan ISBN barcode</h2></div>
+          <button class="close-button" id="close-scanner-dialog" type="button" aria-label="Close scanner"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+        </div>
+        <div class="utility-dialog-body scanner-body">
+          <p>Point the camera at the barcode on the back of the book, or choose a barcode photo.</p>
+          <div id="isbn-reader"></div>
+          <p class="scanner-status" id="scanner-status" aria-live="polite"></p>
+        </div>
+        <div class="utility-dialog-footer"><button class="secondary-button" id="cancel-scanner" type="button">Cancel</button></div>
+      </div>
+    </dialog>
+
+    <dialog class="utility-dialog metadata-dialog" id="metadata-dialog">
+      <div class="utility-dialog-shell">
+        <div class="dialog-header">
+          <div><p class="eyebrow">Review first</p><h2 id="metadata-dialog-title">Metadata changes</h2></div>
+          <button class="close-button" id="close-metadata-dialog" type="button" aria-label="Close metadata review"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+        </div>
+        <div class="utility-dialog-body">
+          <p id="metadata-summary"></p>
+          <div class="metadata-changes" id="metadata-changes"></div>
+        </div>
+        <div class="utility-dialog-footer">
+          <button class="secondary-button" id="cancel-metadata" type="button">Cancel</button>
+          <button class="primary-button" id="apply-metadata" type="button">Apply selected</button>
+        </div>
+      </div>
+    </dialog>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  </body>
+</html>

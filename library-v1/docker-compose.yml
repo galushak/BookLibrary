@@ -1,0 +1,11 @@
+services:
+  library:
+    build: .
+    container_name: home-library-v1
+    restart: unless-stopped
+    ports:
+      - "8787:8080"
+    volumes:
+      - ./data:/data
+    environment:
+      TZ: America/New_York
