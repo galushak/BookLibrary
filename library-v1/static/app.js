@@ -6,6 +6,9 @@ const state = {
   sort: "updated",
   lookupResults: [],
   lookupSelectionToken: 0,
+  coverChoices: [],
+  coverManagerOpen: false,
+  coverChoicesLoading: false,
   seriesCandidates: [],
   seriesImportSeries: "",
   seriesGroups: new Map(),
@@ -30,6 +33,7 @@ const elements = {
   dialogKicker: document.querySelector("#dialog-kicker"),
   deleteButton: document.querySelector("#delete-book"),
   refreshBookButton: document.querySelector("#refresh-book-metadata"),
+  findSeriesButton: document.querySelector("#find-series-books"),
   saveButton: document.querySelector("#save-book"),
   lookupQuery: document.querySelector("#lookup-query"),
   lookupButton: document.querySelector("#lookup-button"),
@@ -44,8 +48,18 @@ const elements = {
   coverUrl: document.querySelector("#book-cover-url"),
   coverImage: document.querySelector("#cover-preview-image"),
   coverPlaceholder: document.querySelector("#cover-preview .cover-placeholder"),
+  coverChoicePanel: document.querySelector("#cover-choice-panel"),
+  coverChoiceTitle: document.querySelector("#cover-choice-title"),
+  coverChoiceSummary: document.querySelector("#cover-choice-summary"),
+  coverChoices: document.querySelector("#cover-choices"),
+  coverManagerActions: document.querySelector("#cover-manager-actions"),
   coverFile: document.querySelector("#book-cover-file"),
   uploadCoverButton: document.querySelector("#upload-cover"),
+  clearCoverButton: document.querySelector("#clear-cover"),
+  modifyCoverButton: document.querySelector("#modify-cover"),
+  managerUploadCoverButton: document.querySelector("#manager-upload-cover"),
+  managerClearCoverButton: document.querySelector("#manager-clear-cover"),
+  closeCoverManagerButton: document.querySelector("#close-cover-manager"),
   progressField: document.querySelector("#progress-field"),
   progress: document.querySelector("#book-current-page"),
   progressOutput: document.querySelector("#progress-output"),
@@ -249,7 +263,7 @@ function seriesSort(a, b) {
 }
 
 function installCoverFallbacks(container) {
-  container.querySelectorAll("img[data-cover], img[data-folder-cover], img[data-series-cover]").forEach((image) => {
+  container.querySelectorAll("img[data-cover], img[data-folder-cover], img[data-series-cover], img[data-lookup-cover]").forEach((image) => {
     image.addEventListener("error", () => {
       image.hidden = true;
       const placeholder = image.nextElementSibling;
@@ -297,7 +311,7 @@ function bookCard(book) {
     : "";
   const rating = book.rating > 0
     ? `<span class="rating-stars" aria-label="${book.rating} out of 5 stars">${"★".repeat(book.rating)}${"☆".repeat(5 - book.rating)}</span>`
-    : "<span></span>";
+    : "";
   const pages = book.total_pages > 0
     ? `<span class="page-count">${Number(book.total_pages).toLocaleString()} pages</span>`
     : "";
@@ -305,16 +319,12 @@ function bookCard(book) {
   const ownership = ownershipLabels[book.ownership]
     ? `<span class="ownership-chip ${book.ownership}">${ownershipLabels[book.ownership]}</span>`
     : "";
-  const quickAction = `<label class="quick-status"><span class="sr-only">Change reading status</span><select data-quick-status aria-label="Change status for ${escapeHtml(book.title)}">
-    <option value="">Set status…</option>
-    ${["in_progress", "finished", "dnf"].filter((value) => value !== book.status).map((value) => `<option value="${value}">${statusLabels[value]}</option>`).join("")}
-  </select></label>`;
   const progress = book.status === "in_progress"
     ? `<div class="progress-overlay" title="${book.total_pages ? `Page ${book.current_page} of ${book.total_pages}` : "Reading"}"><span style="width:${book.progress}%"></span></div>`
     : "";
 
   return `
-    <article class="book-card" data-book-id="${book.id}">
+    <article class="book-card" data-book-id="${book.id}" data-edit-id="${book.id}">
       <div class="cover-wrap">
         <span class="status-badge ${book.status}">${statusLabels[book.status]}</span>
         <button class="book-cover-button" type="button" data-edit-id="${book.id}" aria-label="Edit ${escapeHtml(book.title)}">
@@ -332,8 +342,7 @@ function bookCard(book) {
         </div>
         <p class="book-author">${escapeHtml(book.authors || "Unknown author")}</p>
         ${series ? `<p class="series-label">${series}</p>` : ""}
-        <div class="book-labels">${formats}${ownership}</div>
-        <div class="book-meta"><span class="book-meta-info">${rating}${pages}</span>${quickAction}</div>
+        <div class="book-labels">${formats}${ownership}${pages}${rating}</div>
       </div>
     </article>`;
 }
@@ -403,12 +412,19 @@ function resetForm() {
   elements.lookupStatus.textContent = "";
   elements.lookupStatus.className = "lookup-status";
   state.lookupResults = [];
+  state.coverChoices = [];
+  state.coverManagerOpen = false;
+  state.coverChoicesLoading = false;
+  elements.uploadCoverButton.hidden = false;
+  elements.clearCoverButton.hidden = false;
+  elements.modifyCoverButton.hidden = true;
   clearSeriesImport();
   setRating(0);
   updateCoverPreview("");
   updateStatusControls();
   elements.deleteButton.hidden = true;
   elements.refreshBookButton.hidden = true;
+  elements.findSeriesButton.hidden = true;
 }
 
 function clearSeriesImport() {
@@ -456,7 +472,7 @@ function renderSeriesImport(data) {
   const existingCopy = data.existing_count
     ? ` ${data.existing_count} ${data.existing_count === 1 ? "book is" : "books are"} already on your shelves.`
     : "";
-  elements.seriesImportSummary.textContent = `Missing books will be added as TBR.${existingCopy}`;
+  elements.seriesImportSummary.textContent = `Missing books will be added as TBR and Need to Purchase.${existingCopy}`;
   elements.seriesImportBooks.innerHTML = missing.map((book) => {
     const cover = displayImageUrl(book.cover_url);
     const label = book.volume ? `Book ${escapeHtml(book.volume)}` : "Series book";
@@ -515,6 +531,9 @@ function openEditDialog(bookId) {
   elements.saveButton.textContent = "Save changes";
   elements.deleteButton.hidden = false;
   elements.refreshBookButton.hidden = false;
+  elements.uploadCoverButton.hidden = true;
+  elements.clearCoverButton.hidden = true;
+  elements.modifyCoverButton.hidden = false;
 
   for (const [key, value] of Object.entries(book)) {
     if (key === "formats") {
@@ -533,13 +552,24 @@ function openEditDialog(bookId) {
   elements.progress.max = String(Math.max(Number(book.total_pages) || 0, 1));
   elements.progress.value = String(book.current_page || 0);
   setRating(book.rating || 0);
-  updateCoverPreview(book.cover_url);
+  if (book.cover_url) {
+    addCoverChoice(book.cover_url, "Current", true);
+  } else {
+    updateCoverPreview("");
+  }
   updateStatusControls();
+  updateFindSeriesButton();
   elements.dialog.showModal();
 }
 
 function closeDialog() {
   elements.dialog.close();
+}
+
+function updateFindSeriesButton() {
+  const isEditing = Boolean(document.querySelector("#book-id").value);
+  const hasSeries = Boolean(document.querySelector("#book-series").value.trim());
+  elements.findSeriesButton.hidden = !(isEditing && hasSeries);
 }
 
 function setFormats(formats) {
@@ -561,6 +591,115 @@ function updateCoverPreview(url) {
     elements.coverImage.hidden = true;
     elements.coverPlaceholder.hidden = false;
   }
+  renderCoverChoices();
+}
+
+function renderCoverChoices() {
+  const selectedUrl = elements.coverUrl.value;
+  const choices = state.coverChoices
+    .map((choice, index) => ({ ...choice, index, safeUrl: displayImageUrl(choice.url) }))
+    .filter((choice) => choice.safeUrl);
+  const isEditing = Boolean(document.querySelector("#book-id").value);
+  const showPanel = state.coverManagerOpen || (!isEditing && choices.length >= 2);
+  const showChoices = state.coverManagerOpen ? choices.length > 0 : choices.length >= 2;
+  elements.coverChoicePanel.hidden = !showPanel;
+  elements.coverManagerActions.hidden = !state.coverManagerOpen;
+  elements.coverChoiceTitle.textContent = state.coverManagerOpen ? "Modify cover" : "Choose a cover";
+  elements.coverChoiceSummary.textContent = state.coverChoicesLoading
+    ? "Finding other catalog covers…"
+    : state.coverManagerOpen
+      ? choices.length > 1
+        ? "Select a catalog cover, upload your own, or remove it."
+        : choices.length === 1
+          ? "No other catalog covers found. You can upload your own or remove this one."
+          : "No catalog cover found. You can upload your own or leave it empty."
+      : "Pick the version you want to keep.";
+  elements.coverChoices.innerHTML = !showChoices
+    ? ""
+    : choices.map((choice) => {
+      const selected = choice.url === selectedUrl;
+      return `
+        <button class="cover-choice${selected ? " active" : ""}" type="button" data-cover-choice="${choice.index}" aria-pressed="${selected}" aria-label="Use ${escapeHtml(choice.label)} cover" title="${escapeHtml(choice.label)}">
+          <img src="${choice.safeUrl}" alt="" loading="lazy">
+          <span>${escapeHtml(choice.label)}</span>
+        </button>`;
+    }).join("");
+  elements.coverChoices.querySelectorAll("img").forEach((image) => {
+    image.addEventListener("error", () => {
+      image.closest(".cover-choice").hidden = true;
+    }, { once: true });
+  });
+}
+
+function addCoverChoice(url, label, select = false) {
+  const coverUrl = String(url || "").trim();
+  if (!coverUrl) {
+    if (select) updateCoverPreview("");
+    return;
+  }
+  const existing = state.coverChoices.find((choice) => choice.url === coverUrl);
+  if (!existing) {
+    state.coverChoices.push({ url: coverUrl, label });
+  } else if (existing.label === "Current" && label !== "Current") {
+    existing.label = label;
+  }
+  if (select) {
+    updateCoverPreview(coverUrl);
+  } else {
+    renderCoverChoices();
+  }
+}
+
+async function discoverCoverChoicesForBook(book) {
+  if (state.coverChoicesLoading) return;
+  state.coverChoicesLoading = true;
+  renderCoverChoices();
+  try {
+    let match = null;
+    try {
+      const found = await api(`/api/lookup?q=${encodeURIComponent(`${book.title} ${book.authors || ""}`)}`);
+      match = (found.results || []).find((candidate) => sameCatalogBook(book, candidate))
+        || (found.results || []).find((candidate) => String(candidate.title).trim().toLocaleLowerCase() === String(book.title).trim().toLocaleLowerCase())
+        || null;
+      if (match?.cover_url) addCoverChoice(match.cover_url, "Search");
+    } catch {
+      // Edition lookup below can still find an alternate cover.
+    }
+
+    const params = new URLSearchParams();
+    if (book.isbn) params.set("isbn", book.isbn);
+    const workKey = match?.open_library_key || book.open_library_key;
+    if (workKey) params.set("work_key", workKey);
+    if (match?.cover_id) params.set("cover_id", match.cover_id);
+    if (params.size) {
+      try {
+        const details = await api(`/api/lookup/details?${params}`);
+        if (details.cover_url) {
+          addCoverChoice(details.cover_url, details.source === "goodreads" ? "Goodreads" : "Edition");
+        }
+      } catch {
+        // The current and search covers remain available.
+      }
+    }
+  } finally {
+    state.coverChoicesLoading = false;
+    renderCoverChoices();
+  }
+}
+
+async function openCoverManager() {
+  const bookId = Number(document.querySelector("#book-id").value);
+  const book = state.books.find((item) => item.id === bookId);
+  if (!book) return;
+  state.coverManagerOpen = true;
+  renderCoverChoices();
+  await discoverCoverChoicesForBook(book);
+}
+
+function closeCoverManager() {
+  state.coverManagerOpen = false;
+  renderCoverChoices();
+  elements.modifyCoverButton.focus();
 }
 
 async function uploadCoverImage(event) {
@@ -574,6 +713,8 @@ async function uploadCoverImage(event) {
 
   elements.uploadCoverButton.disabled = true;
   elements.uploadCoverButton.textContent = "Preparing…";
+  elements.managerUploadCoverButton.disabled = true;
+  elements.managerUploadCoverButton.textContent = "Preparing…";
   const objectUrl = URL.createObjectURL(file);
   try {
     const image = new Image();
@@ -600,7 +741,7 @@ async function uploadCoverImage(event) {
       if (encoded.length <= 1_300_000) break;
     }
     if (!encoded || encoded.length > 1_300_000) throw new Error("That cover could not be compressed below 1 MB.");
-    updateCoverPreview(encoded);
+    addCoverChoice(encoded, "Uploaded", true);
     showToast("Cover uploaded. Save the book to keep it.");
   } catch (error) {
     showToast(error.message || "That cover could not be prepared.", "error");
@@ -608,6 +749,8 @@ async function uploadCoverImage(event) {
     URL.revokeObjectURL(objectUrl);
     elements.uploadCoverButton.disabled = false;
     elements.uploadCoverButton.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0L8 8m4-4 4 4M5 20h14"/></svg>Upload cover';
+    elements.managerUploadCoverButton.disabled = false;
+    elements.managerUploadCoverButton.textContent = "Upload cover";
   }
 }
 
@@ -666,13 +809,17 @@ async function lookupBooks() {
       const cover = displayImageUrl(book.cover_url);
       return `
         <button class="lookup-result" type="button" data-result-index="${index}">
-          <span class="lookup-cover">${cover ? `<img src="${cover}" alt="" loading="lazy">` : "No cover"}</span>
+          <span class="lookup-cover">
+            ${cover ? `<img data-lookup-cover src="${cover}" alt="" loading="lazy">` : ""}
+            <span class="lookup-cover-fallback" ${cover ? "hidden" : ""}>No cover</span>
+          </span>
           <span class="lookup-result-copy">
             <strong>${escapeHtml(book.title)}</strong>
             <small>${escapeHtml(book.authors || "Unknown author")}${book.year ? ` · ${book.year}` : ""}${book.total_pages ? ` · ${Number(book.total_pages).toLocaleString()} pages` : ""}</small>
           </span>
         </button>`;
     }).join("");
+    installCoverFallbacks(elements.lookupResults);
   } catch (error) {
     elements.lookupStatus.textContent = error.message;
     elements.lookupStatus.className = "lookup-status error";
@@ -693,7 +840,12 @@ async function chooseLookupResult(index) {
   document.querySelector("#book-volume").value = "";
   document.querySelector("#book-total-pages").value = book.total_pages || "";
   document.querySelector("#book-open-library-key").value = book.open_library_key || "";
-  updateCoverPreview(book.cover_url || "");
+  state.coverChoices = [];
+  if (book.cover_url) {
+    addCoverChoice(book.cover_url, "Search", true);
+  } else {
+    updateCoverPreview("");
+  }
   clearSeriesImport();
   elements.lookupResults.innerHTML = "";
   updateStatusControls();
@@ -713,7 +865,9 @@ async function chooseLookupResult(index) {
       if (details.authors) document.querySelector("#book-authors").value = details.authors;
       if (details.isbn) document.querySelector("#book-isbn").value = details.isbn;
       if (details.total_pages) document.querySelector("#book-total-pages").value = details.total_pages;
-      if (details.cover_url) updateCoverPreview(details.cover_url);
+      if (details.cover_url) {
+        addCoverChoice(details.cover_url, details.source === "goodreads" ? "Goodreads" : "Edition", true);
+      }
       if (details.series) {
         selectedSeries = details.series;
         document.querySelector("#book-series").value = details.series;
@@ -769,7 +923,7 @@ async function saveBook(event) {
       try {
         const result = await api("/api/books/series", {
           method: "POST",
-          body: JSON.stringify({ books: state.seriesCandidates, formats: data.formats, ownership: data.ownership }),
+          body: JSON.stringify({ books: state.seriesCandidates, formats: data.formats }),
         });
         seriesCreated = result.created_count || 0;
       } catch {
@@ -809,28 +963,6 @@ async function deleteBook() {
     showToast(error.message, "error");
   } finally {
     elements.deleteButton.disabled = false;
-  }
-}
-
-async function quickStatus(bookId, status, control) {
-  if (!status) return;
-  control.disabled = true;
-  try {
-    await api(`/api/books/${bookId}`, {
-      method: "PUT",
-      body: JSON.stringify({ status }),
-    });
-    const messages = {
-      in_progress: "Moved to In Progress.",
-      finished: "Marked as Finished. Nice work!",
-      dnf: "Marked as DNF.",
-    };
-    showToast(messages[status] || "Reading status updated.");
-    await loadLibrary();
-  } catch (error) {
-    control.disabled = false;
-    control.value = "";
-    showToast(error.message, "error");
   }
 }
 
@@ -974,6 +1106,9 @@ async function latestBookMetadata(book) {
   const params = new URLSearchParams();
   if (book.isbn) params.set("isbn", book.isbn);
   if (book.open_library_key) params.set("work_key", book.open_library_key);
+  if (String(book.cover_url || "").includes("goodreads.com/books/")) {
+    params.set("cover_url", book.cover_url);
+  }
   if (params.size) return api(`/api/lookup/details?${params}`);
   const found = await api(`/api/lookup?q=${encodeURIComponent(`${book.title} ${book.authors || ""}`)}`);
   const match = found.results?.[0];
@@ -1039,31 +1174,36 @@ function sameCatalogBook(book, candidate) {
   return String(book.title).trim().toLocaleLowerCase() === String(candidate.title).trim().toLocaleLowerCase();
 }
 
-async function refreshSeriesMetadata() {
-  const group = state.seriesGroups.get(state.openSeriesKey);
-  if (!group) return;
-  const books = [...group.books].sort(seriesSort);
-  const source = books.find((book) => book.isbn || book.open_library_key) || books[0];
-  elements.refreshSeriesButton.disabled = true;
-  elements.refreshSeriesButton.textContent = "Checking…";
+async function reviewSeriesMetadata({ seriesName, books, source, button, onApplied }) {
+  const idleContent = button.innerHTML;
+  button.disabled = true;
+  button.textContent = "Checking…";
   try {
-    let seriesUrl = "";
+    let latest = {};
     try {
-      seriesUrl = (await latestBookMetadata(source)).series_url || "";
+      latest = await latestBookMetadata(source);
     } catch {
       // Series discovery can still use its catalog fallbacks without a Goodreads URL.
     }
-    const params = new URLSearchParams({ series: group.name, author: source.authors || "" });
-    if (seriesUrl) params.set("series_url", seriesUrl);
+    const params = new URLSearchParams({
+      series: seriesName,
+      author: latest.authors || source.authors || "",
+    });
+    if (latest.series_url) params.set("series_url", latest.series_url);
     const catalog = await api(`/api/lookup/series?${params}`);
+    const candidates = Array.isArray(catalog.books) ? catalog.books : [];
+    if (!candidates.length) {
+      throw new Error(`No other numbered books were found for ${seriesName}.`);
+    }
+
     const changes = [];
-    for (const candidate of catalog.books || []) {
+    for (const candidate of candidates) {
       const existing = books.find((book) => sameCatalogBook(book, candidate));
       if (!existing) {
         changes.push({
           kind: "add",
           label: `Add ${candidate.volume ? `Book ${candidate.volume}: ` : ""}${candidate.title}`,
-          detail: "TBR • same ownership and format as the first book in this folder",
+          detail: `TBR • Need to Purchase • same format as ${source.title}`,
           candidate,
         });
         continue;
@@ -1081,10 +1221,11 @@ async function refreshSeriesMetadata() {
         });
       }
     }
-    if (!changes.length) return showToast(`${group.name} is already up to date.`);
+    if (!changes.length) return showToast(`${seriesName} is already up to date.`);
+
     openMetadataReview(
-      `Refresh ${group.name}`,
-      "Confirm missing books and series-order corrections individually.",
+      `Find more in ${seriesName}`,
+      "Confirm each missing book or series-order correction before it is applied.",
       changes,
       async (selected) => {
         elements.applyMetadata.disabled = true;
@@ -1098,14 +1239,14 @@ async function refreshSeriesMetadata() {
           if (additions.length) {
             const result = await api("/api/books/series", {
               method: "POST",
-              body: JSON.stringify({ books: additions, formats: source.formats, ownership: source.ownership }),
+              body: JSON.stringify({ books: additions, formats: source.formats }),
             });
             added = result.created_count || 0;
           }
           closeMetadataDialog();
-          closeSeriesDialog();
+          if (onApplied) onApplied();
           await loadLibrary();
-          showToast(`${updates.length} corrected; ${added} added as TBR.`);
+          showToast(`${updates.length} corrected; ${added} added as TBR and Need to Purchase.`);
         } finally {
           elements.applyMetadata.disabled = false;
         }
@@ -1114,9 +1255,38 @@ async function refreshSeriesMetadata() {
   } catch (error) {
     showToast(error.message, "error");
   } finally {
-    elements.refreshSeriesButton.disabled = false;
-    elements.refreshSeriesButton.textContent = "Refresh series";
+    button.disabled = false;
+    button.innerHTML = idleContent;
   }
+}
+
+async function refreshSeriesMetadata() {
+  const group = state.seriesGroups.get(state.openSeriesKey);
+  if (!group) return;
+  const books = [...group.books].sort(seriesSort);
+  const source = books.find((book) => book.isbn || book.open_library_key || book.cover_url) || books[0];
+  await reviewSeriesMetadata({
+    seriesName: group.name,
+    books,
+    source,
+    button: elements.refreshSeriesButton,
+    onApplied: closeSeriesDialog,
+  });
+}
+
+async function findMoreSeriesBooks() {
+  const bookId = Number(document.querySelector("#book-id").value);
+  const source = state.books.find((book) => book.id === bookId);
+  const seriesName = document.querySelector("#book-series").value.trim();
+  if (!source || !seriesName) return;
+  const books = state.books.filter((book) => seriesKey(book.series) === seriesKey(seriesName));
+  await reviewSeriesMetadata({
+    seriesName,
+    books: books.length ? books : [source],
+    source: { ...source, series: seriesName },
+    button: elements.findSeriesButton,
+    onApplied: closeDialog,
+  });
 }
 
 document.querySelectorAll("#header-add, #hero-add, #empty-add").forEach((button) => {
@@ -1153,14 +1323,10 @@ elements.grid.addEventListener("click", (event) => {
   const editButton = event.target.closest("[data-edit-id]");
   if (editButton) return openEditDialog(editButton.dataset.editId);
 });
-elements.grid.addEventListener("change", (event) => {
-  const control = event.target.closest("[data-quick-status]");
-  if (!control) return;
-  const card = control.closest("[data-book-id]");
-  quickStatus(card.dataset.bookId, control.value, control);
-});
 document.querySelector("#close-series-dialog").addEventListener("click", closeSeriesDialog);
 elements.refreshSeriesButton.addEventListener("click", refreshSeriesMetadata);
+elements.findSeriesButton.addEventListener("click", findMoreSeriesBooks);
+document.querySelector("#book-series").addEventListener("input", updateFindSeriesButton);
 elements.seriesList.addEventListener("click", (event) => {
   const bookButton = event.target.closest("[data-series-edit]");
   if (!bookButton) return;
@@ -1182,7 +1348,17 @@ elements.form.addEventListener("submit", saveBook);
 elements.deleteButton.addEventListener("click", deleteBook);
 elements.refreshBookButton.addEventListener("click", refreshBookMetadata);
 elements.uploadCoverButton.addEventListener("click", () => elements.coverFile.click());
+elements.modifyCoverButton.addEventListener("click", openCoverManager);
+elements.managerUploadCoverButton.addEventListener("click", () => elements.coverFile.click());
+elements.managerClearCoverButton.addEventListener("click", () => updateCoverPreview(""));
+elements.closeCoverManagerButton.addEventListener("click", closeCoverManager);
 elements.coverFile.addEventListener("change", uploadCoverImage);
+elements.coverChoices.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-cover-choice]");
+  if (!button) return;
+  const choice = state.coverChoices[Number(button.dataset.coverChoice)];
+  if (choice) updateCoverPreview(choice.url);
+});
 elements.restoreButton.addEventListener("click", () => elements.restoreFile.click());
 elements.restoreFile.addEventListener("change", chooseRestoreFile);
 document.querySelectorAll("#close-restore-dialog, #cancel-restore").forEach((button) => button.addEventListener("click", closeRestoreDialog));
@@ -1199,7 +1375,7 @@ elements.applyMetadata.addEventListener("click", async () => {
     elements.applyMetadata.disabled = false;
   }
 });
-document.querySelector("#clear-cover").addEventListener("click", () => updateCoverPreview(""));
+elements.clearCoverButton.addEventListener("click", () => updateCoverPreview(""));
 document.querySelectorAll('input[name="status"]').forEach((radio) => radio.addEventListener("change", updateStatusControls));
 elements.progress.addEventListener("input", () => {
   const totalPages = Math.max(0, Number(elements.totalPages.value) || 0);

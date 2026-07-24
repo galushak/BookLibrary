@@ -32,6 +32,8 @@ STATUSES = {"tbr", "in_progress", "finished", "dnf"}
 OWNERSHIP_STATES = {"owned", "ku", "need_to_purchase"}
 MAX_BODY_BYTES = 10_000_000
 MAX_COVER_DATA_BYTES = 1_000_000
+GOODREADS_BOOK_CACHE: dict[str, dict[str, Any]] = {}
+GOODREADS_SERIES_CACHE: dict[str, list[dict[str, Any]]] = {}
 
 # Small, source-verified corrections for incomplete Open Library work records.
 # Keep these keyed by stable work ID so title collisions cannot apply them broadly.
@@ -376,6 +378,10 @@ def json_ld_documents(page: str) -> list[dict[str, Any]]:
 
 def goodreads_book_metadata(url: str) -> dict[str, Any]:
     """Return normalized metadata from a Goodreads book page or ISBN redirect."""
+    requested_path = urllib.parse.urlparse(url).path
+    requested_id_match = re.match(r"/book/show/(\d+)", requested_path)
+    if requested_id_match and requested_id_match.group(1) in GOODREADS_BOOK_CACHE:
+        return dict(GOODREADS_BOOK_CACHE[requested_id_match.group(1)])
     page, final_url = goodreads_text(url)
     parsed = urllib.parse.urlparse(final_url)
     if parsed.hostname != "www.goodreads.com" or not parsed.path.startswith("/book/show/"):
@@ -402,6 +408,7 @@ def goodreads_book_metadata(url: str) -> dict[str, Any]:
         series = html_lib.unescape(series_match.group(3)).strip()
 
     title = html_lib.unescape(str(document.get("name") or "")).strip()
+    title = re.sub(r"[\u200b-\u200d\ufeff]", "", title)
     if series and volume:
         suffix = re.compile(
             rf"\s*\(\s*{re.escape(series)}\s*(?:#|,\s*#?)\s*{re.escape(volume)}\s*\)\s*$",
@@ -439,7 +446,7 @@ def goodreads_book_metadata(url: str) -> dict[str, Any]:
         flags=re.IGNORECASE | re.DOTALL,
     )
     book_id_match = re.match(r"/book/show/(\d+)", parsed.path)
-    return {
+    result = {
         "title": title,
         "authors": authors,
         "year": int(published_match.group(1)) if published_match else None,
@@ -453,6 +460,9 @@ def goodreads_book_metadata(url: str) -> dict[str, Any]:
         "goodreads_url": final_url,
         "goodreads_id": book_id_match.group(1) if book_id_match else "",
     }
+    if result["goodreads_id"]:
+        GOODREADS_BOOK_CACHE[result["goodreads_id"]] = dict(result)
+    return result
 
 
 def enrich_goodreads_book(book: dict[str, Any]) -> dict[str, Any]:
@@ -479,6 +489,9 @@ def goodreads_series_books(series_url: str, requested_series: str) -> list[dict[
         or not re.fullmatch(r"/series/\d+-[a-z0-9-]+", parsed.path)
     ):
         return []
+    cache_key = f"{parsed.path}|{series_group_key(requested_series)}"
+    if cache_key in GOODREADS_SERIES_CACHE:
+        return [dict(book) for book in GOODREADS_SERIES_CACHE[cache_key]]
     try:
         page, _ = goodreads_text(series_url)
     except (urllib.error.URLError, TimeoutError, ValueError):
@@ -496,6 +509,7 @@ def goodreads_series_books(series_url: str, requested_series: str) -> list[dict[
 
     books: list[dict[str, Any]] = []
     seen_ids: set[str] = set()
+    seen_positions: set[str] = set()
     props_pattern = r'data-react-class="ReactComponents\.SeriesList"\s+data-react-props="([^"]+)"'
     for encoded_props in re.findall(props_pattern, page, flags=re.IGNORECASE):
         try:
@@ -521,6 +535,8 @@ def goodreads_series_books(series_url: str, requested_series: str) -> list[dict[
             if not position_match:
                 continue
             position = position_match.group(1)
+            if position in seen_positions:
+                continue
             title = re.sub(
                 rf"\s*\(\s*{re.escape(source_series or requested_series)}\s*"
                 rf"(?:#|,\s*#?)\s*{re.escape(position)}\s*\)\s*$",
@@ -528,7 +544,9 @@ def goodreads_series_books(series_url: str, requested_series: str) -> list[dict[
                 title,
                 flags=re.IGNORECASE,
             ).strip()
+            title = re.sub(r"[\u200b-\u200d\ufeff]", "", title)
             seen_ids.add(book_id)
+            seen_positions.add(position)
             author_item = item.get("author") if isinstance(item.get("author"), dict) else {}
             display_author = html_lib.unescape(str(author_item.get("name") or "")).strip()
             cover_url = html_lib.unescape(str(item.get("imageUrl") or "")).strip()
@@ -560,6 +578,7 @@ def goodreads_series_books(series_url: str, requested_series: str) -> list[dict[
     if books:
         with ThreadPoolExecutor(max_workers=min(5, len(books))) as executor:
             books = list(executor.map(enrich_goodreads_book, books))
+        GOODREADS_SERIES_CACHE[cache_key] = [dict(book) for book in books]
     return books
 
 
@@ -686,15 +705,38 @@ def looks_like_collection(title: str) -> bool:
 
 def allowed_cover_host(hostname: str | None) -> bool:
     host = (hostname or "").casefold()
+    # Open Library redirects older cover IDs to its storage on Archive.org.
     return (
         host in {
             "covers.openlibrary.org",
             "aethonbooks.com",
             "i.gr-assets.com",
             "m.media-amazon.com",
+            "archive.org",
         }
+        or host.endswith(".archive.org")
         or host.endswith(".smushcdn.com")
     )
+
+
+def goodreads_book_id(value: str) -> str:
+    """Extract a Goodreads book ID without accepting an arbitrary fetch URL."""
+    raw_value = str(value or "").strip()
+    key_match = re.fullmatch(r"goodreads:(\d{1,20})", raw_value, flags=re.IGNORECASE)
+    if key_match:
+        return key_match.group(1)
+    try:
+        parsed = urllib.parse.urlparse(raw_value)
+    except ValueError:
+        return ""
+    if not allowed_cover_host(parsed.hostname):
+        return ""
+    cover_match = re.search(
+        r"/books/\d+[a-z]/(\d{1,20})\.(?:jpe?g|png|webp)$",
+        parsed.path,
+        flags=re.IGNORECASE,
+    )
+    return cover_match.group(1) if cover_match else ""
 
 
 def normalize_book(payload: dict[str, Any], existing: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -1042,14 +1084,44 @@ class LibraryHandler(BaseHTTPRequestHandler):
     def lookup_book_details(self, query: dict[str, list[str]]) -> None:
         isbn = clean_isbn((query.get("isbn", [""])[0] or "").strip())
         work_key = (query.get("work_key", [""])[0] or "").strip()
+        cover_url = (query.get("cover_url", [""])[0] or "").strip()[:2000]
+        goodreads_id = goodreads_book_id(work_key) or goodreads_book_id(cover_url)
         try:
             preferred_cover_id = int((query.get("cover_id", ["0"])[0] or "0").strip())
         except ValueError:
             preferred_cover_id = 0
         if work_key and not re.fullmatch(r"/works/OL\d+W", work_key):
             work_key = ""
-        if not isbn and not work_key:
-            return self.send_error_json(HTTPStatus.BAD_REQUEST, "An ISBN or Open Library work key is required.")
+        if not isbn and not work_key and not goodreads_id:
+            return self.send_error_json(
+                HTTPStatus.BAD_REQUEST,
+                "An ISBN, catalog key, or Goodreads cover is required.",
+            )
+
+        if goodreads_id:
+            try:
+                direct_goodreads = goodreads_book_metadata(
+                    f"https://www.goodreads.com/book/show/{goodreads_id}"
+                )
+            except (urllib.error.URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
+                print(f"Goodreads book ID lookup failed: {exc}")
+                direct_goodreads = {}
+            if direct_goodreads:
+                return self.send_json(
+                    {
+                        "series": str(direct_goodreads.get("series") or ""),
+                        "volume": str(direct_goodreads.get("volume") or ""),
+                        "isbn": str(direct_goodreads.get("isbn") or isbn),
+                        "total_pages": int(direct_goodreads.get("total_pages") or 0),
+                        "format_hint": str(direct_goodreads.get("format_hint") or ""),
+                        "title": str(direct_goodreads.get("title") or ""),
+                        "authors": str(direct_goodreads.get("authors") or ""),
+                        "cover_url": str(direct_goodreads.get("cover_url") or cover_url),
+                        "series_url": str(direct_goodreads.get("series_url") or ""),
+                        "source": "goodreads",
+                        "warnings": [],
+                    }
+                )
 
         def fetch_json(url: str, timeout: int = 10) -> dict[str, Any]:
             request = urllib.request.Request(url, headers={"User-Agent": "HomeLibraryV1/1.2"})
@@ -1121,7 +1193,14 @@ class LibraryHandler(BaseHTTPRequestHandler):
 
         resolved_isbn = edition_isbn(edition) or isbn
         goodreads: dict[str, Any] = {}
-        if resolved_isbn:
+        if goodreads_id:
+            try:
+                goodreads = goodreads_book_metadata(
+                    f"https://www.goodreads.com/book/show/{goodreads_id}"
+                )
+            except (urllib.error.URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
+                print(f"Goodreads book ID lookup failed: {exc}")
+        if not goodreads and resolved_isbn:
             try:
                 goodreads = goodreads_book_metadata(
                     f"https://www.goodreads.com/book/isbn/{urllib.parse.quote(resolved_isbn)}"
@@ -1417,10 +1496,6 @@ class LibraryHandler(BaseHTTPRequestHandler):
             not isinstance(inherited_formats, list) or len(inherited_formats) > 3
         ):
             return self.send_error_json(HTTPStatus.BAD_REQUEST, "Series formats must be a list.")
-        inherited_ownership = payload.get("ownership") if "ownership" in payload else None
-        if inherited_ownership is not None and inherited_ownership not in OWNERSHIP_STATES:
-            return self.send_error_json(HTTPStatus.BAD_REQUEST, "Invalid series ownership state.")
-
         created: list[dict[str, Any]] = []
         skipped: list[str] = []
         errors: list[str] = []
@@ -1440,10 +1515,7 @@ class LibraryHandler(BaseHTTPRequestHandler):
                     candidate["formats"] = inherited_formats
                 else:
                     candidate.setdefault("formats", ["physical"])
-                if inherited_ownership is not None:
-                    candidate["ownership"] = inherited_ownership
-                else:
-                    candidate.setdefault("ownership", "owned")
+                candidate["ownership"] = "need_to_purchase"
                 try:
                     book = normalize_book(candidate)
                 except ValueError as exc:

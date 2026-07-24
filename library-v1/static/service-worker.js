@@ -1,9 +1,9 @@
-const CACHE = "home-library-v1-shell-16";
+const CACHE = "home-library-v1-shell-24";
 const SHELL = [
   "/",
-  "/styles.css?v=1.4.1",
+  "/styles.css?v=1.4.7",
   "/vendor/html5-qrcode.min.js?v=2.3.8",
-  "/app.js?v=1.4.1",
+  "/app.js?v=1.4.9",
   "/icon.svg",
   "/manifest.webmanifest",
 ];
